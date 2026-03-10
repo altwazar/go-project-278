@@ -5,7 +5,7 @@ import (
 	"log"
 )
 
-func main() {
+func setupRouter() *gin.Engine {
 	router := gin.New()
 	//router.Use(gin.Recovery())
 	router.Use(func(c *gin.Context) {
@@ -24,14 +24,20 @@ func main() {
 	})
 	router.Use(gin.Logger())
 
-	router.GET("/ping", func(c *gin.Context) {
-		c.String(200, "pong")
-	})
+	router.GET("/ping", PingHandler)
 	// Тест логов и восстановления
-	router.GET("/crash", func(c *gin.Context) {
-		log.Println("Вызов ошибуки")
-		panic("Ошибка!")
-	})
+	router.GET("/crash", CrashHandler)
+	return router
+}
 
+func main() {
+	router := setupRouter()
 	router.Run(":8080")
+}
+func PingHandler(c *gin.Context) {
+	c.String(200, "pong")
+}
+func CrashHandler(c *gin.Context) {
+	log.Println("Вызов ошибуки")
+	panic("Ошибка!")
 }
