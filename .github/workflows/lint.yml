@@ -1,0 +1,47 @@
+name: Lint
+
+on:
+  push:
+    branches: [ "**" ]
+  pull_request:
+
+jobs:
+  # На гитхабе (нельзя использовать полный путь с https)
+  lint-github:
+    if: ${{ github.server_url == 'https://github.com' }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.24'
+          cache: true
+
+      - name: Run golangci-lint (GitHub action)
+        uses: golangci/golangci-lint-action@v8
+        with:
+          version: v2.1.2
+          args: --timeout=5m
+
+  # На forgejo runner (полный путь до экшена на гитхабе)
+  lint-forgejo:
+    if: ${{ github.server_url != 'https://github.com' }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.24'
+          cache: true
+
+      - name: Run golangci-lint (GitHub action)
+        uses: https://github.com/golangci/golangci-lint-action@v8
+        with:
+          version: v2.1.2
+          args: --timeout=5m
