@@ -27,6 +27,9 @@ COPY --from=backend-builder /go/bin/goose /usr/local/bin/goose
 COPY bin/run.sh /app/bin/run.sh
 RUN chmod +x /app/bin/run.sh
 
+# Устанавливаем bash
+RUN apk add --no-cache bash
+
 EXPOSE 8080
 
 CMD ["/app/bin/run.sh"]
