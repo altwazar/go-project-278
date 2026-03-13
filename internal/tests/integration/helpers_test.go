@@ -18,29 +18,6 @@ import (
 	"urlshortener/internal/repository"
 )
 
-// Для тестов, которые должны закоммитить изменения
-func withCommittedTransaction(t *testing.T, fn func(ctx context.Context, repo *repository.Repository)) {
-	t.Helper()
-	withTransaction(t, true, fn)
-
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
-	defer cancel()
-
-	// Создаем репозиторий
-	repo, err := repository.New(ctx, connStr)
-	if err != nil {
-		t.Fatalf("create repo: %v", err)
-	}
-	defer repo.Close()
-
-}
-
-// Для тестов, которые должны откатить изменения
-func withRollbackTransaction(t *testing.T, fn func(ctx context.Context, repo *repository.Repository)) {
-	t.Helper()
-	withTransaction(t, false, fn)
-}
-
 // withTransactionForSubtest создает транзакцию для одного подтеста
 func withTransactionForSubtest(t *testing.T, commit bool, fn func(ctx context.Context, repo *repository.Repository)) {
 	t.Helper()

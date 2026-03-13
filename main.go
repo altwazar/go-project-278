@@ -2,12 +2,12 @@ package main
 
 import (
 	"context"
+	"github.com/gin-gonic/gin"
 	"log"
+	"os"
 	"urlshortener/internal/api"
 	"urlshortener/internal/config"
 	"urlshortener/internal/repository"
-
-	"github.com/gin-gonic/gin"
 )
 
 func setupRouter(handlers *api.Handlers) *gin.Engine {
@@ -73,7 +73,9 @@ func main() {
 
 	// Запускаем сервер
 	if err := router.Run(":" + cfg.Port); err != nil {
-		log.Fatalf("Failed to start server: %v", err)
+		log.Printf("Failed to start server: %v", err)
+		repo.Close() // явно закрываем
+		os.Exit(1)
 	}
 }
 
