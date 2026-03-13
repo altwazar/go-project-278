@@ -23,7 +23,7 @@ type Repository struct {
 	queries *db.Queries
 	pool    *pgxpool.Pool
 }
-
+// Создаём подключение к базе и возвращаем пул вместе с запросами
 func New(ctx context.Context, databaseURL string) (*Repository, error) {
 	config, err := pgxpool.ParseConfig(databaseURL)
 	if err != nil {
@@ -47,6 +47,11 @@ func New(ctx context.Context, databaseURL string) (*Repository, error) {
 	}, nil
 }
 
+// Костыль для тестов, подсовывание запросов в новой транзакции
+func (r *Repository) SetQueries(q *db.Queries) {
+	r.queries = q
+}
+
 func (r *Repository) Close() {
 	if r.pool != nil {
 		r.pool.Close()
@@ -55,7 +60,7 @@ func (r *Repository) Close() {
 
 // GenerateShortName создает уникальное короткое имя
 func (r *Repository) GenerateShortName(ctx context.Context) (string, error) {
-	for i := 0; i < 5; i++ { // Пробуем 5 раз
+	for i := 0; i < 5; i++ { // Ленивая защита от коллизий
 		bytes := make([]byte, 3) // 6 символов в hex
 		if _, err := rand.Read(bytes); err != nil {
 			return "", fmt.Errorf("generate random: %w", err)
@@ -167,7 +172,6 @@ func (r *Repository) UpdateLink(ctx context.Context, id int32, originalURL, shor
 		params.OriginalUrl = pgtype.Text{Valid: false}
 	}
 
-	// Для ShortName используем pgtype.Text
 	if shortName != nil {
 		params.ShortName = pgtype.Text{
 			String: *shortName,
@@ -187,11 +191,16 @@ func (r *Repository) UpdateLink(ctx context.Context, id int32, originalURL, shor
 
 // DeleteLink удаляет ссылку
 func (r *Repository) DeleteLink(ctx context.Context, id int32) error {
-	err := r.queries.DeleteLink(ctx, id)
+	_, err := r.queries.GetLink(ctx, id)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			return ErrNotFound
 		}
+		return fmt.Errorf("check existing: %w", err)
+	}
+
+	err = r.queries.DeleteLink(ctx, id)
+	if err != nil {
 		return fmt.Errorf("delete link: %w", err)
 	}
 	return nil

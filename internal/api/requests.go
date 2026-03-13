@@ -1,5 +1,6 @@
 package api
 
+// Структуры для работы с запросами и ответами
 type CreateLinkRequest struct {
 	OriginalURL string `json:"original_url" binding:"required,url"`
 	ShortName   string `json:"short_name" binding:"omitempty,alphanum,max=50"`

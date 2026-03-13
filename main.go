@@ -52,10 +52,11 @@ func setupRouter(handlers *api.Handlers) *gin.Engine {
 }
 
 func main() {
+	// Путь к базе данных, порт и url сервиса на выходе
 	cfg := config.Load()
 
-	// Подключаемся к базе данных через наш репозиторий
 	ctx := context.Background()
+	// Получаем пул для работы с базой
 	repo, err := repository.New(ctx, cfg.DatabaseURL)
 	if err != nil {
 		log.Fatalf("Failed to connect to database: %v", err)
@@ -63,6 +64,8 @@ func main() {
 	defer repo.Close()
 
 	// Создаем обработчики
+	// repo передаём для функций работы с базой
+	// cfg для url на выходе
 	handlers := api.NewHandlers(repo, cfg)
 
 	// Настраиваем роутер
@@ -74,10 +77,12 @@ func main() {
 	}
 }
 
+// Для теста доступности сервиса
 func PingHandler(c *gin.Context) {
 	c.String(200, "pong")
 }
 
+// Для теста обработки паники
 func CrashHandler(c *gin.Context) {
 	log.Println("Вызов ошибуки")
 	panic("Ошибка!")
