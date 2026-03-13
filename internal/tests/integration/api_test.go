@@ -4,11 +4,11 @@ package integration
 
 import (
 	"context"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strconv"
 	"testing"
-
 	"urlshortener/internal/api"
 	"urlshortener/internal/config"
 	"urlshortener/internal/db"
@@ -18,10 +18,6 @@ import (
 )
 
 func TestCreateLink(t *testing.T) {
-	// Создаем дубликат для теста на наличие дубликата
-	withTransactionForSubtest(t, true, func(ctx context.Context, repo *repository.Repository) {
-		createTestLink(t, ctx, repo, "https://duplicate.com", "duplicate")
-	})
 
 	tests := []struct {
 		name       string
@@ -95,7 +91,9 @@ func TestCreateLink(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			withTransactionForSubtest(t, false, func(ctx context.Context, repo *repository.Repository) {
+			withTransactionForSubtest(t, func(ctx context.Context, repo *repository.Repository) {
+
+				createTestLink(t, ctx, repo, "https://duplicate.com", "duplicate")
 				router := setupTestRouter(api.NewHandlers(repo, &config.Config{BaseURL: "http://localhost:8080"}))
 
 				req := tt.request.toHTTP(t)
@@ -165,7 +163,7 @@ func TestGetLink(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			withTransactionForSubtest(t, false, func(ctx context.Context, repo *repository.Repository) {
+			withTransactionForSubtest(t, func(ctx context.Context, repo *repository.Repository) {
 				testLink := tt.setupData(t, repo)
 
 				router := setupTestRouter(api.NewHandlers(repo, &config.Config{BaseURL: "http://localhost:8080"}))
@@ -186,14 +184,15 @@ func TestGetLink(t *testing.T) {
 		})
 	}
 }
-
 func TestListLinks(t *testing.T) {
-	t.Run("list all links", func(t *testing.T) {
-		withTransactionForSubtest(t, false, func(ctx context.Context, repo *repository.Repository) {
-			// Создаем несколько тестовых ссылок
-			createTestLink(t, ctx, repo, "https://example1.com", "link1")
-			createTestLink(t, ctx, repo, "https://example2.com", "link2")
-			createTestLink(t, ctx, repo, "https://example3.com", "link3")
+	t.Run("list all links with default pagination", func(t *testing.T) {
+		withTransactionForSubtest(t, func(ctx context.Context, repo *repository.Repository) {
+			// Создаем 15 тестовых ссылок
+			for i := 0; i < 15; i++ {
+				createTestLink(t, ctx, repo,
+					fmt.Sprintf("https://example%d.com", i),
+					fmt.Sprintf("link%d", i))
+			}
 
 			router := setupTestRouter(api.NewHandlers(repo, &config.Config{BaseURL: "http://localhost:8080"}))
 
@@ -202,21 +201,74 @@ func TestListLinks(t *testing.T) {
 
 			assert.Equal(t, http.StatusOK, resp.Code)
 
+			// Проверяем заголовок Content-Range
+			contentRange := resp.Header().Get("Content-Range")
+			assert.Contains(t, contentRange, "links 0-9/15")
+
+			// Проверяем что вернулось 10 записей
 			var response []api.LinkResponse
 			parseResponse(t, resp, &response)
+			assert.Len(t, response, 10)
+		})
+	})
 
-			assert.GreaterOrEqual(t, len(response), 3)
+	t.Run("list links with custom range", func(t *testing.T) {
+		withTransactionForSubtest(t, func(ctx context.Context, repo *repository.Repository) {
+			// Создаем 15 тестовых ссылок
+			for i := 0; i < 15; i++ {
+				createTestLink(t, ctx, repo,
+					fmt.Sprintf("https://example%d.com", i),
+					fmt.Sprintf("link%d", i))
+			}
+
+			router := setupTestRouter(api.NewHandlers(repo, &config.Config{BaseURL: "http://localhost:8080"}))
+
+			req := TestRequest{Method: "GET", Path: "/api/links?range=[5,10]"}.toHTTP(t)
+			resp := executeRequest(router, req)
+
+			assert.Equal(t, http.StatusOK, resp.Code)
+
+			// Проверяем заголовок Content-Range
+			contentRange := resp.Header().Get("Content-Range")
+			assert.Contains(t, contentRange, "links 5-9/15")
+
+			// Проверяем что вернулось 5 записей
+			var response []api.LinkResponse
+			parseResponse(t, resp, &response)
+			assert.Len(t, response, 5)
+			// Проверяем что первая запись имеет ID 6 (если счет с 1)
+			if len(response) > 0 {
+				assert.GreaterOrEqual(t, response[0].ID, int64(6))
+			}
+		})
+	})
+
+	t.Run("invalid range format", func(t *testing.T) {
+		withTransactionForSubtest(t, func(ctx context.Context, repo *repository.Repository) {
+			router := setupTestRouter(api.NewHandlers(repo, &config.Config{BaseURL: "http://localhost:8080"}))
+
+			req := TestRequest{Method: "GET", Path: "/api/links?range=invalid"}.toHTTP(t)
+			resp := executeRequest(router, req)
+
+			assert.Equal(t, http.StatusBadRequest, resp.Code)
+		})
+	})
+
+	t.Run("range end less than start", func(t *testing.T) {
+		withTransactionForSubtest(t, func(ctx context.Context, repo *repository.Repository) {
+			router := setupTestRouter(api.NewHandlers(repo, &config.Config{BaseURL: "http://localhost:8080"}))
+
+			req := TestRequest{Method: "GET", Path: "/api/links?range=[10,5]"}.toHTTP(t)
+			resp := executeRequest(router, req)
+
+			assert.Equal(t, http.StatusBadRequest, resp.Code)
 		})
 	})
 }
 
 func TestUpdateLink(t *testing.T) {
-	// Создаем ссылку с существующим именем для теста конфликта в отдельной транзакции
+
 	var existingShortName string
-	withTransactionForSubtest(t, true, func(ctx context.Context, repo *repository.Repository) {
-		link := createTestLink(t, ctx, repo, "https://existing.com", "existing")
-		existingShortName = link.ShortName
-	})
 
 	tests := []struct {
 		name       string
@@ -342,7 +394,12 @@ func TestUpdateLink(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			withTransactionForSubtest(t, false, func(ctx context.Context, repo *repository.Repository) {
+			withTransactionForSubtest(t, func(ctx context.Context, repo *repository.Repository) {
+
+				// Создаем ссылку с существующим именем для теста конфликта в отдельной транзакции
+
+				link := createTestLink(t, ctx, repo, "https://existing.com", "existing")
+				existingShortName = link.ShortName
 				testLink := tt.setupData(ctx, t, repo)
 
 				router := setupTestRouter(api.NewHandlers(repo, &config.Config{BaseURL: "http://localhost:8080"}))
@@ -400,7 +457,7 @@ func TestDeleteLink(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			withTransactionForSubtest(t, false, func(ctx context.Context, repo *repository.Repository) {
+			withTransactionForSubtest(t, func(ctx context.Context, repo *repository.Repository) {
 				testLink := tt.setupData(t, repo)
 
 				router := setupTestRouter(api.NewHandlers(repo, &config.Config{BaseURL: "http://localhost:8080"}))
@@ -457,7 +514,7 @@ func TestRedirectHandler(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			withTransactionForSubtest(t, false, func(ctx context.Context, repo *repository.Repository) {
+			withTransactionForSubtest(t, func(ctx context.Context, repo *repository.Repository) {
 				testLink := tt.setupData(t, repo)
 
 				router := setupTestRouter(api.NewHandlers(repo, &config.Config{BaseURL: "http://localhost:8080"}))
@@ -481,7 +538,7 @@ func TestRedirectHandler(t *testing.T) {
 
 func TestHealthCheck(t *testing.T) {
 	t.Run("health check", func(t *testing.T) {
-		withTransactionForSubtest(t, false, func(ctx context.Context, repo *repository.Repository) {
+		withTransactionForSubtest(t, func(ctx context.Context, repo *repository.Repository) {
 			router := setupTestRouter(api.NewHandlers(repo, &config.Config{BaseURL: "http://localhost:8080"}))
 
 			req := TestRequest{Method: "GET", Path: "/health"}.toHTTP(t)

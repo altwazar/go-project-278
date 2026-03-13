@@ -4,9 +4,9 @@ package api
 
 import (
 	"errors"
+	"fmt"
 	"net/http"
 	"strconv"
-
 	"urlshortener/internal/db"
 
 	"github.com/gin-gonic/gin"
@@ -28,15 +28,41 @@ func NewHandlers(repo *repository.Repository, config *config.Config) *Handlers {
 	}
 }
 
-// ListLinks возвращает все ссылки
-// GET /api/links
+// ListLinks возвращает ссылки с пагинацией
+// GET /api/links?range=[start,end]
 func (h *Handlers) ListLinks(c *gin.Context) {
-	links, err := h.repo.ListLinks(c.Request.Context())
+	// По умолчанию первые 10 записей
+	start := int32(0)
+	end := int32(10)
+
+	// Парсим range если он есть
+	if rangeStr := c.Query("range"); rangeStr != "" {
+		parsedStart, parsedEnd, err := ParseRange(rangeStr)
+		if err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid range format. Expected [start,end]"})
+			return
+		}
+		start = parsedStart
+		end = parsedEnd
+	}
+
+	// Валидация
+	if start < 0 || end <= start {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid range: end must be greater than start"})
+		return
+	}
+
+	limit := end - start
+	offset := start
+
+	// Получаем данные с пагинацией
+	links, total, err := h.repo.ListLinksWithPagination(c.Request.Context(), limit, offset)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to fetch links"})
 		return
 	}
 
+	// Формируем ответ
 	response := make([]LinkResponse, len(links))
 	for i, link := range links {
 		response[i] = LinkResponse{
@@ -46,6 +72,10 @@ func (h *Handlers) ListLinks(c *gin.Context) {
 			ShortURL:    h.config.BaseURL + "/r/" + link.ShortName,
 		}
 	}
+
+	// Устанавливаем заголовок Content-Range
+	contentRange := fmt.Sprintf("links %d-%d/%d", start, end-1, total)
+	c.Header("Content-Range", contentRange)
 
 	c.JSON(http.StatusOK, response)
 }

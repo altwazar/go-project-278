@@ -19,7 +19,7 @@ import (
 )
 
 // withTransactionForSubtest создает транзакцию для одного подтеста
-func withTransactionForSubtest(t *testing.T, commit bool, fn func(ctx context.Context, repo *repository.Repository)) {
+func withTransactionForSubtest(t *testing.T, fn func(ctx context.Context, repo *repository.Repository)) {
 	t.Helper()
 
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
@@ -40,11 +40,7 @@ func withTransactionForSubtest(t *testing.T, commit bool, fn func(ctx context.Co
 
 		// Выполняем тест
 		fn(ctx, txRepo)
-		if commit != true {
-			return errors.New("rollback transaction")
-		} else {
-			return nil
-		}
+		return errors.New("rollback transaction")
 	})
 }
 

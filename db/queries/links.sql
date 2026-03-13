@@ -2,13 +2,17 @@
 SELECT * FROM links
 WHERE id = $1 LIMIT 1;
 
+-- name: ListLinks :many
+SELECT * FROM links
+ORDER BY id
+LIMIT $1 OFFSET $2;
+
+-- name: CountLinks :one
+SELECT count(*) FROM links;
+
 -- name: GetLinkByShortName :one
 SELECT * FROM links
 WHERE short_name = $1 LIMIT 1;
-
--- name: ListLinks :many
-SELECT * FROM links
-ORDER BY id;
 
 -- name: CreateLink :one
 INSERT INTO links (

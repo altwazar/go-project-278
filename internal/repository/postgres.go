@@ -133,13 +133,37 @@ func (r *Repository) GetLinkByShortName(ctx context.Context, shortName string) (
 	return &link, nil
 }
 
-// ListLinks возвращает все ссылки
+// ListLinks возвращает ВСЕ ссылки (без пагинации)
+// Deprecated: Используйте ListLinksWithPagination для пагинации
 func (r *Repository) ListLinks(ctx context.Context) ([]db.Link, error) {
-	links, err := r.queries.ListLinks(ctx)
+	links, err := r.queries.ListLinks(ctx, db.ListLinksParams{
+		Limit:  1000, // какой-то большой лимит
+		Offset: 0,
+	})
 	if err != nil {
 		return nil, fmt.Errorf("list links: %w", err)
 	}
 	return links, nil
+}
+
+// ListLinksWithPagination возвращает ссылки с пагинацией и общее количество
+func (r *Repository) ListLinksWithPagination(ctx context.Context, limit, offset int32) ([]db.Link, int64, error) {
+	// Получаем общее количество
+	count, err := r.queries.CountLinks(ctx)
+	if err != nil {
+		return nil, 0, fmt.Errorf("count links: %w", err)
+	}
+
+	// Получаем записи с пагинацией
+	links, err := r.queries.ListLinks(ctx, db.ListLinksParams{
+		Limit:  limit,
+		Offset: offset,
+	})
+	if err != nil {
+		return nil, 0, fmt.Errorf("list links with pagination: %w", err)
+	}
+
+	return links, count, nil
 }
 
 // UpdateLink обновляет ссылку
