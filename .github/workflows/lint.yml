@@ -23,7 +23,7 @@ jobs:
       - name: Run golangci-lint (GitHub action)
         uses: golangci/golangci-lint-action@v8
         with:
-          version: v2.1.2
+          version: v2.4.0
           args: --timeout=5m
 
   # На forgejo runner (полный путь до экшена на гитхабе)
@@ -37,7 +37,7 @@ jobs:
       - name: Set up Go
         uses: actions/setup-go@v5
         with:
-          go-version: '1.24'
+          go-version: '1.25'
           cache: true
 
       - name: Run golangci-lint (GitHub action)
