@@ -1,10 +1,11 @@
+// Входная точка сервиса.
+// Из полученной конфигурации создаётся подключение к БД и запускется веб-сервис
 package main
 
 import (
 	"context"
 	"github.com/gin-gonic/gin"
 	"log"
-	"os"
 	"urlshortener/internal/api"
 	"urlshortener/internal/config"
 	"urlshortener/internal/repository"
@@ -74,8 +75,6 @@ func main() {
 	// Запускаем сервер
 	if err := router.Run(":" + cfg.Port); err != nil {
 		log.Printf("Failed to start server: %v", err)
-		repo.Close() // явно закрываем
-		os.Exit(1)
 	}
 }
 
@@ -85,7 +84,7 @@ func PingHandler(c *gin.Context) {
 }
 
 // Для теста обработки паники
-func CrashHandler(c *gin.Context) {
+func CrashHandler(_ *gin.Context) {
 	log.Println("Вызов ошибуки")
 	panic("Ошибка!")
 }

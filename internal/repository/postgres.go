@@ -1,3 +1,4 @@
+// Тут слой доступа к данным в базе PostreSQL и методы для работы с записями.
 package repository
 
 import (
@@ -14,16 +15,21 @@ import (
 )
 
 var (
-	ErrNotFound      = errors.New("record not found")
+	// ErrNotFound ошибка при ненайденной записи
+	ErrNotFound = errors.New("record not found")
+	// ErrAlreadyExists ошибка обновления/добавления при существующей записи
 	ErrAlreadyExists = errors.New("record already exists")
-	ErrGenerateName  = errors.New("failed to generate unique short name")
+	// ErrGenerateName ошибка генерации уникального имени
+	ErrGenerateName = errors.New("failed to generate unique short name")
 )
 
+// Repository объединяет методы взаимодействия с БД
 type Repository struct {
 	queries *db.Queries
 	pool    *pgxpool.Pool
 }
-// Создаём подключение к базе и возвращаем пул вместе с запросами
+
+// New создаёт подключение к базе и возвращаем пул вместе с запросами
 func New(ctx context.Context, databaseURL string) (*Repository, error) {
 	config, err := pgxpool.ParseConfig(databaseURL)
 	if err != nil {
@@ -47,11 +53,12 @@ func New(ctx context.Context, databaseURL string) (*Repository, error) {
 	}, nil
 }
 
-// Костыль для тестов, подсовывание запросов в новой транзакции
+// SetQueries костыль для тестов, подсовывание запросов в новой транзакции
 func (r *Repository) SetQueries(q *db.Queries) {
 	r.queries = q
 }
 
+// Close закрывает пул
 func (r *Repository) Close() {
 	if r.pool != nil {
 		r.pool.Close()
@@ -137,49 +144,17 @@ func (r *Repository) ListLinks(ctx context.Context) ([]db.Link, error) {
 
 // UpdateLink обновляет ссылку
 func (r *Repository) UpdateLink(ctx context.Context, id int32, originalURL, shortName *string) (*db.Link, error) {
-	// Проверяем существование ссылки
-	_, err := r.queries.GetLink(ctx, id)
-	if err != nil {
-		if errors.Is(err, pgx.ErrNoRows) {
-			return nil, ErrNotFound
-		}
-		return nil, fmt.Errorf("check existing: %w", err)
-	}
-
-	// Если обновляем short_name, проверяем уникальность
-	if shortName != nil {
-		existing, err := r.queries.GetLinkByShortName(ctx, *shortName)
-		if err == nil && existing.ID != id {
-			return nil, ErrAlreadyExists
-		}
-		if err != nil && !errors.Is(err, pgx.ErrNoRows) {
-			return nil, fmt.Errorf("check short name: %w", err)
-		}
-	}
-
-	// Подготавливаем параметры для обновления с использованием pgtype.Text
-	params := db.UpdateLinkParams{
-		ID: id,
-	}
-
-	// Для OriginalUrl используем pgtype.Text
-	if originalURL != nil {
-		params.OriginalUrl = pgtype.Text{
-			String: *originalURL,
-			Valid:  true,
-		}
-	} else {
-		params.OriginalUrl = pgtype.Text{Valid: false}
+	if err := r.checkLinkExists(ctx, id); err != nil {
+		return nil, err
 	}
 
 	if shortName != nil {
-		params.ShortName = pgtype.Text{
-			String: *shortName,
-			Valid:  true,
+		if err := r.checkShortNameUnique(ctx, *shortName, id); err != nil {
+			return nil, err
 		}
-	} else {
-		params.ShortName = pgtype.Text{Valid: false}
 	}
+
+	params := r.buildUpdateParams(id, originalURL, shortName)
 
 	link, err := r.queries.UpdateLink(ctx, params)
 	if err != nil {
@@ -187,6 +162,42 @@ func (r *Repository) UpdateLink(ctx context.Context, id int32, originalURL, shor
 	}
 
 	return &link, nil
+}
+
+func (r *Repository) checkLinkExists(ctx context.Context, id int32) error {
+	_, err := r.queries.GetLink(ctx, id)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return ErrNotFound
+		}
+		return fmt.Errorf("check existing: %w", err)
+	}
+	return nil
+}
+
+func (r *Repository) checkShortNameUnique(ctx context.Context, shortName string, excludeID int32) error {
+	existing, err := r.queries.GetLinkByShortName(ctx, shortName)
+	if err == nil && existing.ID != excludeID {
+		return ErrAlreadyExists
+	}
+	if err != nil && !errors.Is(err, pgx.ErrNoRows) {
+		return fmt.Errorf("check short name: %w", err)
+	}
+	return nil
+}
+
+func (r *Repository) buildUpdateParams(id int32, originalURL, shortName *string) db.UpdateLinkParams {
+	params := db.UpdateLinkParams{ID: id}
+
+	if originalURL != nil {
+		params.OriginalUrl = pgtype.Text{String: *originalURL, Valid: true}
+	}
+
+	if shortName != nil {
+		params.ShortName = pgtype.Text{String: *shortName, Valid: true}
+	}
+
+	return params
 }
 
 // DeleteLink удаляет ссылку

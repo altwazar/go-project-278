@@ -1,4 +1,4 @@
-// db/migrations/embed.go
+// Костыль для доступа к файлам миграции из модулей
 package migrations
 
 import "embed"

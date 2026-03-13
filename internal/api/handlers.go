@@ -1,3 +1,5 @@
+// Тут обработчики HTTP запросов
+// CRUD плюс проверка работы перенаправления и проверка здоровья сервиса
 package api
 
 import (
@@ -5,16 +7,20 @@ import (
 	"net/http"
 	"strconv"
 
+	"urlshortener/internal/db"
+
 	"github.com/gin-gonic/gin"
 	"urlshortener/internal/config"
 	"urlshortener/internal/repository"
 )
 
+// Handlers стуктура прослойка для обработчиков запросов над БД
 type Handlers struct {
 	repo   *repository.Repository
 	config *config.Config
 }
 
+// NewHandlers конструктор Handlers
 func NewHandlers(repo *repository.Repository, config *config.Config) *Handlers {
 	return &Handlers{
 		repo:   repo,
@@ -53,35 +59,49 @@ func (h *Handlers) CreateLink(c *gin.Context) {
 		return
 	}
 
-	// Генерируем короткое имя, если не указано
-	shortName := req.ShortName
-	if shortName == "" {
-		generated, err := h.repo.GenerateShortName(c.Request.Context())
-		if err != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to generate short name"})
-			return
-		}
-		shortName = generated
+	shortName, err := h.getOrGenerateShortName(c, req)
+	if err != nil {
+		return // ответ уже отправлен в getOrGenerateShortName
 	}
 
 	link, err := h.repo.CreateLink(c.Request.Context(), req.OriginalURL, shortName)
 	if err != nil {
-		if errors.Is(err, repository.ErrAlreadyExists) {
-			c.JSON(http.StatusConflict, gin.H{"error": "Short name already exists"})
-			return
-		}
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to create link"})
+		h.handleCreateError(c, err)
 		return
 	}
 
+	h.sendLinkResponse(c, http.StatusCreated, link)
+}
+
+func (h *Handlers) getOrGenerateShortName(c *gin.Context, req CreateLinkRequest) (string, error) {
+	if req.ShortName != "" {
+		return req.ShortName, nil
+	}
+
+	generated, err := h.repo.GenerateShortName(c.Request.Context())
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to generate short name"})
+		return "", err
+	}
+	return generated, nil
+}
+
+func (h *Handlers) handleCreateError(c *gin.Context, err error) {
+	if errors.Is(err, repository.ErrAlreadyExists) {
+		c.JSON(http.StatusConflict, gin.H{"error": "Short name already exists"})
+		return
+	}
+	c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to create link"})
+}
+
+func (h *Handlers) sendLinkResponse(c *gin.Context, status int, link *db.Link) {
 	response := LinkResponse{
 		ID:          int64(link.ID),
 		OriginalURL: link.OriginalUrl,
 		ShortName:   link.ShortName,
 		ShortURL:    h.config.BaseURL + "/r/" + link.ShortName,
 	}
-
-	c.JSON(http.StatusCreated, response)
+	c.JSON(status, response)
 }
 
 // GetLink возвращает ссылку по ID
@@ -116,10 +136,9 @@ func (h *Handlers) GetLink(c *gin.Context) {
 // UpdateLink обновляет ссылку
 // PUT /api/links/:id
 func (h *Handlers) UpdateLink(c *gin.Context) {
-	id, err := strconv.ParseInt(c.Param("id"), 10, 32)
+	id, err := h.parseID(c)
 	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid ID format"})
-		return
+		return // ответ уже отправлен в parseID
 	}
 
 	var req UpdateLinkRequest
@@ -128,39 +147,42 @@ func (h *Handlers) UpdateLink(c *gin.Context) {
 		return
 	}
 
-	// Проверяем, что хотя бы одно поле для обновления передано
-	if req.OriginalURL == nil && req.ShortName == nil {
+	if !h.hasFieldsToUpdate(&req) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "At least one field to update must be provided"})
 		return
 	}
 
-	link, err := h.repo.UpdateLink(
-		c.Request.Context(),
-		int32(id),
-		req.OriginalURL,
-		req.ShortName,
-	)
+	link, err := h.repo.UpdateLink(c.Request.Context(), id, req.OriginalURL, req.ShortName)
 	if err != nil {
-		if errors.Is(err, repository.ErrNotFound) {
-			c.JSON(http.StatusNotFound, gin.H{"error": "Link not found"})
-			return
-		}
-		if errors.Is(err, repository.ErrAlreadyExists) {
-			c.JSON(http.StatusConflict, gin.H{"error": "Short name already exists"})
-			return
-		}
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to update link"})
+		h.handleUpdateError(c, err)
 		return
 	}
 
-	response := LinkResponse{
-		ID:          int64(link.ID),
-		OriginalURL: link.OriginalUrl,
-		ShortName:   link.ShortName,
-		ShortURL:    h.config.BaseURL + "/r/" + link.ShortName,
-	}
+	h.sendLinkResponse(c, http.StatusOK, link)
+}
 
-	c.JSON(http.StatusOK, response)
+func (h *Handlers) parseID(c *gin.Context) (int32, error) {
+	id, err := strconv.ParseInt(c.Param("id"), 10, 32)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid ID format"})
+		return 0, err
+	}
+	return int32(id), nil
+}
+
+func (h *Handlers) hasFieldsToUpdate(req *UpdateLinkRequest) bool {
+	return req.OriginalURL != nil || req.ShortName != nil
+}
+
+func (h *Handlers) handleUpdateError(c *gin.Context, err error) {
+	switch {
+	case errors.Is(err, repository.ErrNotFound):
+		c.JSON(http.StatusNotFound, gin.H{"error": "Link not found"})
+	case errors.Is(err, repository.ErrAlreadyExists):
+		c.JSON(http.StatusConflict, gin.H{"error": "Short name already exists"})
+	default:
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to update link"})
+	}
 }
 
 // DeleteLink удаляет ссылку
