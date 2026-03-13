@@ -1,4 +1,4 @@
-// Тут слой доступа к данным в базе PostreSQL и методы для работы с записями.
+// Package repository - слой доступа к данным в базе PostreSQL и методы для работы с записями.
 package repository
 
 import (
